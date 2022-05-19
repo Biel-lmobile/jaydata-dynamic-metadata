@@ -162,6 +162,7 @@ export class Metadata {
         containsField(propertySchema, "nullable", v => {
             definition.nullable = parsebool(v, true),
             definition.required = parsebool(v, true) === false
+                definition.required = parsebool(v, true) === false
         })
 
         containsField(propertySchema, "partner", p => {
@@ -389,7 +390,44 @@ export class Metadata {
 
         }
     }
+    /**
+     * @remarks
+     * For all the entity types and complex type of every schema, we create a copy of every entity transformed to an Observable class. To ensure compability with the Knockout types.
+     * **/
+    createObservableEntity(enityToClone) {
+        const entityPrefix = 'Observable';
+        let entityClone: any = {};
+        let schemaEntities = JSON.parse(JSON.stringify(enityToClone));
+        schemaEntities.forEach(entity => {
+            entityClone = JSON.parse(JSON.stringify(entity));
+            entityClone.typeName = entityPrefix + entityClone.typeName;
+            const definitionsClone = JSON.parse(JSON.stringify(entityClone.definition));
+            for (let property in definitionsClone) {
+                if (definitionsClone[property].type === 'Array') {
+                    definitionsClone[property].type = 'KnockoutObservableArray<' + definitionsClone[property].elementType + '>'
 
+                } else {
+                    definitionsClone[property].type = 'KnockoutObservable<' + definitionsClone[property].type + '>'
+                }
+            }
+            const innerInstance = {
+                type: entityClone.typeName.split('.').pop(),
+            }
+
+            definitionsClone['innerInstance'] = innerInstance;
+            entityClone.params[2] = definitionsClone;
+            entityClone.definition = definitionsClone;
+
+            if (entity.baseType !== 'Crm.DynamicForms.Rest.Model.DynamicFormElementRest') {
+                const asKoObservable = {
+                    type: 'Observable' + entity.typeName.split('.').pop(),
+                }
+                entity.definition['asKoObservable()'] = asKoObservable;
+                entity.params[2]['asKoObservable()'] = asKoObservable;
+            }
+            enityToClone.push(entityClone);
+        })
+    }
     processMetadata(createdTypes?) {
         var types = createdTypes || []
         var typeDefinitions = []
@@ -417,7 +455,11 @@ export class Metadata {
         var self = this;
         this.metadata.dataServices.schemas.forEach(schema => {
             var ns = schema.namespace
-            dtsModules[ns] = ['declare module ' + ns + ' {', '}'];
+            /** 
+            * @remarks
+            * Instead of declaring modules, we declare namespaces, for the .d.ts content.
+            **/
+            dtsModules[ns] = ['namespace ' + ns + ' {', '}'];
 
             if (schema.enumTypes) {
                 let enumTypes = schema.enumTypes.map(ct => this.createEnumType(ct, ns))
@@ -426,11 +468,13 @@ export class Metadata {
 
             if (schema.complexTypes) {
                 let complexTypes = schema.complexTypes.map(ct => this.createEntityType(ct, ns))
+                this.createObservableEntity(complexTypes);
                 typeDefinitions.push(...complexTypes)
             }
 
             if (schema.entityTypes) {
                 let entityTypes = schema.entityTypes.map(et => this.createEntityType(et, ns))
+                this.createObservableEntity(entityTypes);
                 typeDefinitions.push(...entityTypes)
             }
 
@@ -490,15 +534,29 @@ export class Metadata {
                     Object.keys(d.params[3]).map(dp => '  ' + this._createPropertyDefString(d.params[3][dp])).join(',\n') +
                     '\n]);\n\n';
             } else {
-                dtsPart.push('    export class ' + d.typeName.split('.').pop() + ' extends ' + d.baseType + ' {');
-                if (d.baseType == self.options.contextType){
+                /**
+                 * @remarks
+                 * Add the Observable in front of the types that include it
+                 * **/
+                if (d.typeName.includes('Observable')) {
+                    dtsPart.push('    export class ' + 'Observable' + d.typeName.split('.').pop() + ' extends ' + d.baseType + ' {');
+                } else {
+                    dtsPart.push('    export class ' + d.typeName.split('.').pop() + ' extends ' + d.baseType + ' {');
+                }
+                if (d.baseType == self.options.contextType) {
                     dtsPart.push('        onReady(): Promise<' + d.typeName.split('.').pop() + '>;');
                     dtsPart.push('');
                 }else{
                     dtsPart.push('        constructor();');
                     var ctr = '        constructor(initData: { ';
-                    if (d.params[2] && Object.keys(d.params[2]).length > 0){
-                        ctr += Object.keys(d.params[2]).map(dp => dp + '?: ' + (d.params[2][dp].type == 'Array' ? d.params[2][dp].elementType + '[]' : d.params[2][dp].type)).join('; ');
+                    if (d.params[2] && Object.keys(d.params[2]).length > 0) {
+                        /**
+                         * @remarks
+                         * Remove the asKoObservable and innerInstance from the map, as we don't wont them in the constructor of the entity
+                         * **/
+                        ctr += Object.keys(d.params[2])
+                            .filter(key => key !== 'asKoObservable()' && key !== 'innerInstance')
+                            .map(dp => dp + '?: ' + (d.params[2][dp].type == 'Array' ? d.params[2][dp].elementType + '[]' : d.params[2][dp].type)).join('; ');
                     }
                     ctr += ' });';
                     dtsPart.push(ctr);
@@ -572,7 +630,11 @@ export class Metadata {
             .filter(m => dtsModules[m] && dtsModules[m].length > 2)
             .map(m => dtsModules[m].join('\n\n'))
             .join('\n\n');
-
+        /**
+         * @remarks
+         * Close the declare global
+         * **/
+        types.dts += '\n}';
         // export modules
         types.dts += Object.keys(dtsModules)
             .filter(m => dtsModules[m] && dtsModules[m].length > 2)
@@ -589,6 +651,11 @@ export class Metadata {
                 mod.push('export var ' + contextName + ': ' + contextFullName + ';');
             }
             types.dts += mod.join('\n');
+            /**
+             * @remarks
+             * Declare the JSDate at the end, instead of being declared in the beggining of the file.
+             * **/
+            types.dts += "\ndeclare type JSDate = Date;";
         }
 
         if (this.options.generateTypes === false) {
