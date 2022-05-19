@@ -394,11 +394,11 @@ export class Metadata {
      * @remarks
      * For all the entity types and complex type of every schema, we create a copy of every entity transformed to an Observable class. To ensure compability with the Knockout types.
      * **/
-    createObservableEntity(enityToClone) {
+    createObservableEntity(objToClone) {
         const entityPrefix = 'Observable';
         let entityClone: any = {};
-        let schemaEntities = JSON.parse(JSON.stringify(enityToClone));
-        schemaEntities.forEach(entity => {
+        let schemaEntities = JSON.parse(JSON.stringify(objToClone));
+        schemaEntities.forEach((entity, index) => {
             entityClone = JSON.parse(JSON.stringify(entity));
             entityClone.typeName = entityPrefix + entityClone.typeName;
             const definitionsClone = JSON.parse(JSON.stringify(entityClone.definition));
@@ -422,11 +422,12 @@ export class Metadata {
                 const asKoObservable = {
                     type: 'Observable' + entity.typeName.split('.').pop(),
                 }
-                entity.definition['asKoObservable()'] = asKoObservable;
-                entity.params[2]['asKoObservable()'] = asKoObservable;
+                objToClone[index].definition['asKoObservable()'] = asKoObservable;
+                objToClone[index].params[2]['asKoObservable()'] = asKoObservable;
             }
-            enityToClone.push(entityClone);
+            objToClone.push(entityClone);
         })
+        return objToClone
     }
     processMetadata(createdTypes?) {
         var types = createdTypes || []
@@ -468,13 +469,13 @@ export class Metadata {
 
             if (schema.complexTypes) {
                 let complexTypes = schema.complexTypes.map(ct => this.createEntityType(ct, ns))
-                this.createObservableEntity(complexTypes);
+                complexTypes = this.createObservableEntity(complexTypes);
                 typeDefinitions.push(...complexTypes)
             }
 
             if (schema.entityTypes) {
                 let entityTypes = schema.entityTypes.map(et => this.createEntityType(et, ns))
-                this.createObservableEntity(entityTypes);
+                entityTypes = this.createObservableEntity(entityTypes);
                 typeDefinitions.push(...entityTypes)
             }
 
